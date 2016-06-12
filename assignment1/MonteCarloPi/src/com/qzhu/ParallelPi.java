@@ -20,7 +20,6 @@ public class ParallelPi {
 		private AtomicInteger inCounter;
 		private AtomicInteger outCounter;
 
-		@Override
 		public void run() {
 			System.out.println("thread [" + this.id + "] started");
 
