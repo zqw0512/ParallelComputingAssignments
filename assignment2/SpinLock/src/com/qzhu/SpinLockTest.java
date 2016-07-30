@@ -16,9 +16,13 @@ public class SpinLockTest {
 			long t0 = System.currentTimeMillis();
 
 			System.out.println(id + " try to acquire lock at " + t0);
+			
+			//try acquire the lock
 			lock.lock();
 			long t1 = System.currentTimeMillis();
 			System.out.println(id + " acquired lock at " + System.currentTimeMillis());
+			
+			//do random things(wait 1000ms to simulate the actual work)
 			try {
 				Thread.sleep(1000);
 			} catch (InterruptedException e) {
