@@ -1,10 +1,10 @@
+package com.qzhu;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
@@ -95,7 +95,6 @@ public class EchoNode {
 		try {
 
 			br = new BufferedReader(new FileReader(fileName));
-			StringBuilder sb = new StringBuilder();
 			String line = br.readLine();
 			int i = 1;
 			while (line != null) {
