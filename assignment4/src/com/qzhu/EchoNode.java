@@ -1,59 +1,70 @@
 package com.qzhu;
+
 import java.io.BufferedReader;
-import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.net.ConnectException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class EchoNode {
-	public class ConnectionHandler implements Runnable{
+	public class ConnectionHandler implements Runnable {
 		private Socket socket;
 		private int id;
-		public ConnectionHandler(Socket socket,int id){
-			this.socket=socket;
-			this.id=id;
+
+		public ConnectionHandler(Socket socket, int id) {
+			this.socket = socket;
+			this.id = id;
 		}
-		@Override 
+
+		@Override
 		public void run() {
-			BufferedReader in =null;
+			InputStream is = null;
 			try {
-			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-			String message = null;
-			while ((message = in.readLine())!=null) {
-				// read the text from client
-				log(" socket #"+id+" Read '" + message + "'");
-				if ("ping".equals(message)) {
-					//log("   it's a ping message, skip...");
-
-				}else {
-					doIt(analizMessage(message));
+				is = socket.getInputStream();
+				ObjectInputStream ois = new ObjectInputStream(is);
+				Object object;
+				while ((object = (Message) ois.readObject()) != null) {
+					Message message = (Message) object;
+					log("/connection #"+id+", processing message"+message);
+					processMessage(message);
 				}
 
-			}
-			}catch(Exception e){
+			} catch (EOFException e1) {
+				//safely exit the thread when EOFException Occours
+			} catch (Exception e) {
 				e.printStackTrace();
+			} finally {
+				if (is != null) {
+					try {
+						is.close();
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
 			}
-			
+
 		}
 	}
-	private EchoNode parent;
-	private boolean sendIniMessFlag = false;
-	private boolean iniFlag;
 
-	public void setIniFlag(boolean iniFlag) {
-		this.iniFlag = iniFlag;
+	private EchoNode parent;
+	private boolean initMessageSent = false;
+	private boolean inited;
+
+	public void setInited(boolean inited) {
+		this.inited = inited;
 	}
 
-	public boolean isInit() {
-		return this.iniFlag;
+	public boolean isInited() {
+		return this.inited;
 	}
 
 	private List<EchoNode> neighbors = new ArrayList<EchoNode>();
@@ -76,17 +87,17 @@ public class EchoNode {
 		return send;
 	}
 
-	private boolean receive;
+	private boolean received;
 
 	public boolean isReceived() {
-		return receive;
+		return received;
 	}
 
-	public EchoNode(String ip, int port, boolean send, boolean receive) {
+	public EchoNode(String ip, int port, boolean send, boolean received) {
 		this.ip = ip;
 		this.port = port;
 		this.send = send;
-		this.receive = receive;
+		this.received = received;
 	}
 
 	public static EchoNode createNodeFromFile(String fileName) {
@@ -105,9 +116,9 @@ public class EchoNode {
 				} else {
 
 					String[] k = line.split(":");
-					if (k.length>2 &&  "initiator".equals(k[2])) {
+					if (k.length > 2 && "initiator".equals(k[2])) {
 						// Find if initiator
-						result.setIniFlag(true);
+						result.setInited(true);
 					} else {
 						// Find neighbors
 						result.neighbors.add(new EchoNode(k[0], Integer.parseInt(k[1]), false, false));
@@ -140,23 +151,12 @@ public class EchoNode {
 	public boolean checkReceiveFromAll() {
 		boolean result = true;
 		for (EchoNode n : neighbors) {
-			if (parent==null || parent.port != n.port) {
-				if (!n.receive) {
+			if (parent == null || parent.port != n.port) {
+				if (!n.received) {
 					result = false;
 				}
 			}
 		}
-		return result;
-	}
-
-	public Map<String, String> analizMessage(String message) {
-		String[] ms = message.split("&");
-		String[] msIam = ms[1].split("=");
-		String[] mx = msIam[1].split(":");
-		Map<String, String> result = new HashMap<String, String>();
-		result.put("ip", mx[0]);
-		result.put("port", mx[1]);
-
 		return result;
 	}
 
@@ -167,18 +167,19 @@ public class EchoNode {
 		try {
 			serverSocket = new ServerSocket(port);
 			Socket clientSocket = null;
-			int i=0;
+			int i = 0;
 			for (;;) {
-					
+
 				clientSocket = serverSocket.accept();
 				i++;
-				log("Server Socket #"+i+" Connected");
-				Runnable connectionHandler = new ConnectionHandler(clientSocket,i);
+				log("Server Socket #" + i + " Connected");
+				Runnable connectionHandler = new ConnectionHandler(clientSocket, i);
 				new Thread(connectionHandler).start();
 			}
 
 		} catch (Exception e) {
 			e.printStackTrace();
+			System.exit(2);
 		} finally {
 			try {
 				if (in != null)
@@ -196,17 +197,25 @@ public class EchoNode {
 	}
 
 	public void log(String msg) {
-		System.out.println(this.port+":"+msg);
+		System.out.println(this.port + ":" + msg);
 	}
+
 	public boolean checkNeighborServer() {
+		Message message = new Message(this.ip, this.port, "ping");
 		for (EchoNode n : this.neighbors) {
 			for (;;) {
 				try {
-					sendMessage(n,"ping");
-					log("My neighbor "+n.port+" is online");
+					sendMessage(n, message);
+					log("My neighbor " + n.port + " is online");
 					break;
 				} catch (Exception ex) {
-					log("error in connect " + n.ip + ":" + n.port + ", it's still offline will retry");
+					log("error in connect my neighbor" + n.ip + ":" + n.port + ", it's still offline will retry");
+					try {
+						Thread.sleep(500);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
 				}
 			}
 		}
@@ -214,29 +223,36 @@ public class EchoNode {
 		return true;
 	}
 
-	public void sendMessage(EchoNode n, String msg) {
+	public void sendMessage(EchoNode n, Message message)  {
 		Socket clientSocket;
 		try {
 			clientSocket = new Socket(n.ip, n.port);
-			DataOutputStream outToServer = new DataOutputStream(clientSocket.getOutputStream());
-			outToServer.writeBytes(msg + '\n');
-			clientSocket.setSoTimeout(5000);
-			clientSocket.close();
-			outToServer.close();
-			log("Message:["+msg+"] Sent to " + n.ip + ":" + n.port);
+			try {
 
-		} catch (Exception exc) {
-			if (!"ping".equals(msg)) {
-			exc.printStackTrace();
-			log("Error in send message" + n.ip + ":" + n.port);
+				ObjectOutputStream objectOutput = new ObjectOutputStream(clientSocket.getOutputStream());
+				objectOutput.writeObject(message);
+
+			} catch (Exception e) {
+				e.printStackTrace();
 			}
+			log("Message:[" + message + "] Sent to " + n.ip + ":" + n.port);
+
+		
+		}catch(ConnectException e1) {
+			log("Error in connect " + n.ip + ":" + n.port);
+			throw new RuntimeException(e1);
+
+		} catch (Exception e) {
+			e.printStackTrace();
+			log("Error in send message" + n.ip + ":" + n.port);
+;				throw new RuntimeException(e);
 		}
 	}
 
-	public void sendMssToAllNeighbors(String message) {
+	public void sendMessageToAllNeighbors(Message message) {
 
 		for (EchoNode n : neighbors) {
-			if (parent==null || parent.port != n.port) {
+			if (parent == null || parent.port != n.port) {
 				sendMessage(n, message);
 				n.send = true;
 			}
@@ -244,18 +260,18 @@ public class EchoNode {
 		}
 	}
 
-	public void doIt(Map<String, String> ms) {
-		EchoNode sender = findNodeBtwNeighbors(ms.get("ip"), Integer.parseInt(ms.get("port")));
-		if (iniFlag) {
-			sender.receive = true;
+	public void processMessage(Message message) {
+		EchoNode sender = findNodeBtwNeighbors(message.getFromIp(), message.getFromPort());
+		if (inited) {
+			sender.received = true;
 		} else {
-			if (parent==null) {
+			if (parent == null) {
 				parent = sender;
-				String sendMss = "&Iam=" + this.ip + ":" + this.port;
-				sender.receive = true;
-				sendMssToAllNeighbors(sendMss);
+				Message sendMessage = new Message(this.ip, this.port, "I got my parent, check all other neighbors");
+				sender.received = true;
+				sendMessageToAllNeighbors(sendMessage);
 			} else {
-				sender.receive = true;
+				sender.received = true;
 			}
 		}
 
@@ -263,31 +279,32 @@ public class EchoNode {
 
 	public EchoNode findNodeBtwNeighbors(String ip, int port) {
 		for (EchoNode n : neighbors) {
-			if (n.ip.equals( ip) && n.port == port) {
+			if (n.ip.equals(ip) && n.port == port) {
 				return n;
-
 			}
 		}
+		log("!!!!!!Sender "+ip+":"+port+" not found!! this problem usually caused by wrong configuration, please fix this issue");
 		return null;
 	}
 
 	public void start() {
-		
+
 		new Thread(new Runnable() {
-			@Override public void run() {
+			@Override
+			public void run() {
 				startServer();
 			}
 		}).start();
-		
-		
+
 		if (checkNeighborServer()) {
 			boolean done = false;
 			while (true) {
-				if (iniFlag && !sendIniMessFlag) {
+				if (inited && !initMessageSent) {
 					log("Start to send message from initiator: ");
-					String initMessage = "&Iam=" + ip + ":" + port;
-					sendMssToAllNeighbors(initMessage);
-					sendIniMessFlag = true;
+					Message initMessage = new Message(this.ip, this.port, "I'm initiator!");
+
+					sendMessageToAllNeighbors(initMessage);
+					initMessageSent = true;
 					log("I'm initiator, All my neighbors are:" + neighbors);
 				} else {
 					try {
@@ -298,11 +315,11 @@ public class EchoNode {
 					}
 					log(".");
 					if (checkReceiveFromAll()) {
-						if (iniFlag) {
+						if (inited) {
 							log("** Done **");
 							done = true;
 						} else {
-							String message = "&Iam=" + ip + ":" + port;
+							Message message = new Message(this.ip, this.port, "Message to my parent");
 							sendMessage(parent, message);
 							log("** Done **");
 							done = true;
@@ -310,13 +327,21 @@ public class EchoNode {
 					}
 				}
 				if (done) {
-					if (this.parent!=null) {
-						log("My parent is"+this.parent.getPort());
-					}else {
-						log("I'm the init Node, I have no parent");
+					if (this.parent != null) {
+						log("My parent is" + this.parent.getPort());
+					} else {
+						try {
+							Thread.sleep(500);
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+						log("** I'm the init Node, I have no parent **");
+						log("**** ALL DONE! ****");
 					}
-					StringBuffer sb = new StringBuffer("Found "+this.neighbors.size()+"neighbors, they are").append("\n    ");
-					for (EchoNode n:this.neighbors){
+					StringBuffer sb = new StringBuffer("   I have " + this.neighbors.size() + " neighbors, they are")
+							.append("\n    ");
+					for (EchoNode n : this.neighbors) {
 						sb.append(n.getPort()).append(",");
 					}
 					sb.append("\n");
@@ -328,40 +353,22 @@ public class EchoNode {
 	}
 
 	public static void main(String[] args) {
-//		String filename = "configuration.conf";
-//		log("Start...");
-//		// Find Iam,Initiator,Neighbors
-//		EchoNode self = createNodeFromFile(filename);
-//		log("I am " + self.getIp() + ":" + self.getPort() + " \niniFlag is: " + self.isInit()
-//				+ " \nAll my neighbors are:");
-//		for (EchoNode n : self.neighbors) {
-//			log("  " + n.ip + ":" + n.port);
-//		}
-//		self.start();
+		if (args==null || args.length<1) {
+			System.out.println("please run with at least one configuration file name!");
+			System.exit(0);
+		}
+		for (String s:args) {
+			EchoNode n = createNodeFromFile(s);
+			new Thread(new Runnable() {
+				@Override
+				public void run() {
+					n.start();
+				}
+			}).start();
+		}
 
-		EchoNode n1 =createNodeFromFile("node1.conf");
-		EchoNode n2 =createNodeFromFile("node2.conf");
-		EchoNode n3 =createNodeFromFile("node3.conf");
-		
-		new Thread(new Runnable() {
-			@Override public void run() {
-				n1.start();
-			}
-		}).start();
-		
-		new Thread(new Runnable() {
-			@Override public void run() {
-				n2.start();
-			}
-		}).start();
-		
-		new Thread(new Runnable() {
-			@Override public void run() {
-				n3.start();
-			}
-		}).start();
-		
-		while(true) {
+		while (true) {
+			//keep the server running
 			try {
 				Thread.sleep(5000);
 			} catch (InterruptedException e) {
@@ -369,10 +376,7 @@ public class EchoNode {
 				e.printStackTrace();
 			}
 		}
-		
-		
-		//n1.sendMessage(n2, "&Iam=" + n1.ip + ":" + n1.port);
-				
+
 	}
 
 }
